@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rotmelder</title>
+<style>
+  :root{
+    --bg:#0e1013;
+    --panel:#171a1f;
+    --panel-line:#282d35;
+    --text:#e8eaed;
+    --text-dim:#8a9099;
+    --ok:#3ecf8e;
+    --warn:#f2b84b;
+    --alarm:#e2432c;
+    --alarm-glow:#ff5a3d;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#0e1013; --panel:#171a1f; --panel-line:#282d35; --text:#e8eaed; --text-dim:#8a9099;
+    }
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    height:100%;
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    overflow:hidden;
+    -webkit-user-select:none; user-select:none;
+  }
+  #app{
+    position:relative;
+    height:100%;
+    width:100%;
+    display:flex;
+    flex-direction:column;
+  }
+  #camWrap{
+    position:relative;
+    flex:1;
+    min-height:0;
+    background:#000;
+    overflow:hidden;
+  }
+  video{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    display:block;
+    background:#000;
+  }
+  #overlay{
+    position:absolute;
+    pointer-events:none;
+  }
+  .marker{
+    position:absolute;
+    width:34px;
+    height:34px;
+    transform:translate(-50%,-50%);
+    pointer-events:auto;
+  }
+  .marker .ring{
+    width:100%;
+    height:100%;
+    border-radius:50%;
+    border:2.5px solid var(--ok);
+    box-shadow:0 0 0 3px rgba(0,0,0,.35);
+    transition:border-color .15s ease;
+  }
+  .marker.is-red .ring{
+    border-color:var(--alarm);
+  }
+  .marker .cross{
+    position:absolute;
+    inset:0;
+  }
+  .marker .cross::before,.marker .cross::after{
+    content:"";
+    position:absolute;
+    background:rgba(255,255,255,.9);
+  }
+  .marker .cross::before{ left:50%; top:6px; bottom:6px; width:1px; margin-left:-.5px;}
+  .marker .cross::after{ top:50%; left:6px; right:6px; height:1px; margin-top:-.5px;}
+  .marker .label{
+    position:absolute;
+    top:100%;
+    left:50%;
+    transform:translateX(-50%);
+    margin-top:4px;
+    font-size:11px;
+    color:var(--text);
+    background:rgba(0,0,0,.55);
+    padding:1px 6px;
+    border-radius:4px;
+    white-space:nowrap;
+  }
+  .marker .del{
+    position:absolute;
+    top:-8px;
+    right:-8px;
+    width:20px;
+    height:20px;
+    border-radius:50%;
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+    color:var(--text-dim);
+    font-size:12px;
+    line-height:18px;
+    text-align:center;
+    display:none;
+  }
+  #app.edit .marker .del{ display:block; }
+
+  #hint{
+    position:absolute;
+    top:12px; left:12px; right:12px;
+    text-align:center;
+    font-size:13px;
+    color:var(--text-dim);
+    background:rgba(0,0,0,.45);
+    border-radius:8px;
+    padding:8px 10px;
+    pointer-events:none;
+  }
+
+  #alarmFlash{
+    position:absolute;
+    inset:0;
+    border:8px solid var(--alarm);
+    box-shadow:inset 0 0 60px var(--alarm-glow);
+    opacity:0;
+    pointer-events:none;
+    animation:none;
+  }
+  #alarmFlash.on{
+    opacity:1;
+    animation:flash 1s steps(1,end) infinite;
+  }
+  @keyframes flash{
+    0%,49%{opacity:1;}
+    50%,100%{opacity:.25;}
+  }
+
+  #panel{
+    background:var(--panel);
+    border-top:1px solid var(--panel-line);
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  #status{
+    font-size:13px;
+    color:var(--text-dim);
+    min-height:16px;
+  }
+  #status.alarm{ color:var(--alarm); font-weight:600; }
+  .row{
+    display:flex;
+    gap:8px;
+  }
+  button{
+    flex:1;
+    border:1px solid var(--panel-line);
+    background:#1e232a;
+    color:var(--text);
+    padding:12px 8px;
+    border-radius:10px;
+    font-size:14px;
+    -webkit-tap-highlight-color:transparent;
+  }
+  button:active{ background:#262c35; }
+  button.primary{
+    background:var(--ok);
+    color:#04140c;
+    border-color:var(--ok);
+    font-weight:600;
+  }
+  button.primary.stop{
+    background:var(--alarm);
+    border-color:var(--alarm);
+    color:#1a0500;
+  }
+  button.ghost{ background:transparent; }
+  button.active{
+    background:var(--warn);
+    color:#221600;
+    border-color:var(--warn);
+  }
+  #err{
+    position:absolute;
+    inset:0;
+    display:none;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    padding:24px;
+    text-align:center;
+    color:var(--text-dim);
+    background:var(--bg);
+  }
+  #err.show{ display:flex; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="camWrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="overlay"></div>
+    <div id="hint">Punkt hinzufügen antippen, dann auf jede Status-Box tippen</div>
+    <div id="alarmFlash"></div>
+    <div id="err">
+      <div style="font-size:15px;">Kamera nicht verfügbar. Bitte Kamerazugriff erlauben.</div>
+      <button id="retryBtn" style="flex:none; padding:12px 24px;">Erneut versuchen</button>
+    </div>
+  </div>
+  <div id="panel">
+    <div id="status">Kamera wird gestartet …</div>
+    <div class="row">
+      <button id="addBtn">+ Punkt hinzufügen</button>
+      <button id="editBtn">Punkte bearbeiten</button>
+    </div>
+    <div class="row">
+      <button id="startBtn" class="primary">Überwachung starten</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const hint = document.getElementById('hint');
+  const statusEl = document.getElementById('status');
+  const addBtn = document.getElementById('addBtn');
+  const editBtn = document.getElementById('editBtn');
+  const startBtn = document.getElementById('startBtn');
+  const alarmFlash = document.getElementById('alarmFlash');
+  const errBox = document.getElementById('err');
+  const retryBtn = document.getElementById('retryBtn');
+  const app = document.getElementById('app');
+
+  let points = [];       // {id, xFrac, yFrac, isRed}
+  let nextId = 1;
+  let addMode = false;
+  let editMode = false;
+  let monitoring = false;
+  let muted = false;
+  let audioCtx = null;
+  let alarmTimer = null;
+  let vibrateTimer = null;
+  let wakeLock = null;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  try {
+    const saved = JSON.parse(localStorage.getItem('redwatch_points') || '[]');
+    if (Array.isArray(saved)) {
+      points = saved;
+      nextId = points.reduce((m,p)=>Math.max(m,p.id||0), 0) + 1;
+    }
+  } catch(e){}
+
+  function savePoints(){
+    try { localStorage.setItem('redwatch_points', JSON.stringify(points.map(p=>({id:p.id,xFrac:p.xFrac,yFrac:p.yFrac})))); } catch(e){}
+  }
+
+  async function startCamera(){
+    errBox.classList.remove('show');
+    statusEl.textContent = 'Kamera wird gestartet …';
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      video.addEventListener('loadedmetadata', layout, { once:true });
+      layout();
+      statusEl.textContent = points.length
+        ? 'Bereit. ' + points.length + ' Punkt(e) gespeichert.'
+        : 'Kamera bereit. Punkte markieren.';
+    } catch(e){
+      errBox.classList.add('show');
+      statusEl.textContent = 'Kein Kamerazugriff.';
+    }
+  }
+  retryBtn.addEventListener('click', startCamera);
+
+  // --- Layout: visible video rect within container (object-fit: contain) ---
+  function getVisibleRect(){
+    const wrapRect = video.parentElement.getBoundingClientRect();
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return { left:0, top:0, width:wrapRect.width, height:wrapRect.height };
+    const scale = Math.min(wrapRect.width/vw, wrapRect.height/vh);
+    const dispW = vw*scale, dispH = vh*scale;
+    const left = (wrapRect.width - dispW)/2;
+    const top = (wrapRect.height - dispH)/2;
+    return { left, top, width: dispW, height: dispH };
+  }
+
+  function layout(){
+    const r = getVisibleRect();
+    overlay.style.left = r.left+'px';
+    overlay.style.top = r.top+'px';
+    overlay.style.width = r.width+'px';
+    overlay.style.height = r.height+'px';
+    if (video.videoWidth) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+    renderMarkers();
+  }
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', ()=>setTimeout(layout,200));
+
+  function renderMarkers(){
+    overlay.innerHTML = '';
+    points.forEach(p=>{
+      const m = document.createElement('div');
+      m.className = 'marker' + (p.isRed ? ' is-red' : '');
+      m.style.left = (p.xFrac*100)+'%';
+      m.style.top = (p.yFrac*100)+'%';
+      m.innerHTML = '<div class="ring"></div><div class="cross"></div>'
+        + '<div class="label">'+ (p.name || ('P'+p.id)) +'</div>'
+        + '<div class="del">×</div>';
+      m.querySelector('.del').addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        points = points.filter(pt=>pt.id!==p.id);
+        savePoints();
+        renderMarkers();
+        statusEl.textContent = points.length + ' Punkt(e) gespeichert.';
+      });
+      overlay.appendChild(m);
+    });
+  }
+
+  overlay.addEventListener('click', (ev)=>{
+    if (!addMode) return;
+    const r = overlay.getBoundingClientRect();
+    const xFrac = (ev.clientX - r.left)/r.width;
+    const yFrac = (ev.clientY - r.top)/r.height;
+    if (xFrac<0||xFrac>1||yFrac<0||yFrac>1) return;
+    points.push({ id: nextId++, xFrac, yFrac, isRed:false });
+    savePoints();
+    renderMarkers();
+    statusEl.textContent = points.length + ' Punkt(e) gespeichert.';
+  });
+
+  addBtn.addEventListener('click', ()=>{
+    addMode = !addMode;
+    addBtn.classList.toggle('active', addMode);
+    hint.style.display = addMode ? 'block' : 'none';
+    if (addMode){ editMode=false; editBtn.classList.remove('active'); app.classList.remove('edit'); overlay.style.pointerEvents='auto'; }
+  });
+
+  editBtn.addEventListener('click', ()=>{
+    editMode = !editMode;
+    editBtn.classList.toggle('active', editMode);
+    app.classList.toggle('edit', editMode);
+    overlay.style.pointerEvents = editMode ? 'auto' : (addMode?'auto':'none');
+    if (editMode){ addMode=false; addBtn.classList.remove('active'); hint.style.display='none'; }
+  });
+
+  overlay.style.pointerEvents = 'none';
+
+  // --- Red detection ---
+  function rgbToHsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b);
+    let h, s, v=max;
+    const d=max-min;
+    s = max===0 ? 0 : d/max;
+    if (d===0) h=0;
+    else if (max===r) h = 60*(((g-b)/d)%6);
+    else if (max===g) h = 60*((b-r)/d+2);
+    else h = 60*((r-g)/d+4);
+    if (h<0) h+=360;
+    return [h,s,v];
+  }
+  function isRedColor(r,g,b){
+    const [h,s,v] = rgbToHsv(r,g,b);
+    const hueRed = (h<=18 || h>=345);
+    return hueRed && s>0.42 && v>0.28;
+  }
+  function samplePoint(p){
+    const x = Math.max(0, Math.min(canvas.width-1, Math.round(p.xFrac*canvas.width)));
+    const y = Math.max(0, Math.min(canvas.height-1, Math.round(p.yFrac*canvas.height)));
+    const size = 3;
+    let rs=0,gs=0,bs=0,n=0;
+    for (let dx=-size; dx<=size; dx++){
+      for (let dy=-size; dy<=size; dy++){
+        const px = x+dx, py = y+dy;
+        if (px<0||py<0||px>=canvas.width||py>=canvas.height) continue;
+        const d = ctx.getImageData(px,py,1,1).data;
+        rs+=d[0]; gs+=d[1]; bs+=d[2]; n++;
+      }
+    }
+    if (!n) return [0,0,0];
+    return [rs/n, gs/n, bs/n];
+  }
+
+  // --- Alarm sound / vibration ---
+  function ensureAudio(){
+    if (!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(){
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 880;
+    gain.gain.value = 0.15;
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start();
+    setTimeout(()=>{ osc.stop(); }, 220);
+  }
+  function alarmPulse(){
+    if (muted) return;
+    beep();
+    setTimeout(beep, 320);
+    if (navigator.vibrate) navigator.vibrate([200,100,200]);
+  }
+
+  async function requestWakeLock(){
+    try {
+      if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+    } catch(e){}
+  }
+  document.addEventListener('visibilitychange', ()=>{
+    if (monitoring && document.visibilityState==='visible') requestWakeLock();
+  });
+
+  let loopHandle = null;
+  function monitorLoop(){
+    if (!monitoring) return;
+    if (video.videoWidth) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      let anyRed = false;
+      let redNames = [];
+      points.forEach(p=>{
+        const [r,g,b] = samplePoint(p);
+        const red = isRedColor(r,g,b);
+        if (red !== p.isRed) {
+          p.isRed = red;
+        }
+        if (red){ anyRed = true; redNames.push(p.name || ('P'+p.id)); }
+      });
+      renderMarkers();
+      if (anyRed) {
+        alarmFlash.classList.add('on');
+        statusEl.textContent = 'ALARM: ' + redNames.join(', ') + ' ist ROT';
+        statusEl.classList.add('alarm');
+        if (!alarmTimer) {
+          alarmPulse();
+          alarmTimer = setInterval(alarmPulse, 2000);
+        }
+      } else {
+        alarmFlash.classList.remove('on');
+        statusEl.classList.remove('alarm');
+        statusEl.textContent = 'Überwachung läuft — ' + points.length + ' Punkt(e), alles ok';
+        if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+        muted = false;
+      }
+    }
+    loopHandle = setTimeout(monitorLoop, 350);
+  }
+
+  startBtn.addEventListener('click', ()=>{
+    if (!points.length) {
+      statusEl.textContent = 'Bitte zuerst mindestens einen Punkt markieren.';
+      return;
+    }
+    monitoring = !monitoring;
+    if (monitoring) {
+      ensureAudio();
+      addMode=false; addBtn.classList.remove('active');
+      editMode=false; editBtn.classList.remove('active'); app.classList.remove('edit');
+      overlay.style.pointerEvents='none';
+      hint.style.display='none';
+      startBtn.textContent = 'Überwachung stoppen';
+      startBtn.classList.add('stop');
+      requestWakeLock();
+      monitorLoop();
+    } else {
+      startBtn.textContent = 'Überwachung starten';
+      startBtn.classList.remove('stop');
+      alarmFlash.classList.remove('on');
+      statusEl.classList.remove('alarm');
+      statusEl.textContent = points.length + ' Punkt(e) gespeichert.';
+      if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+      if (loopHandle) { clearTimeout(loopHandle); loopHandle = null; }
+      if (wakeLock) { wakeLock.release().catch(()=>{}); wakeLock = null; }
+    }
+  });
+
+  // Tap anywhere during alarm to mute until it clears
+  document.getElementById('camWrap').addEventListener('click', ()=>{
+    if (monitoring && alarmTimer && !addMode && !editMode) {
+      muted = true;
+      if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
+    }
+  });
+
+  renderMarkers();
+  startCamera();
+})();
+</script>
+</body>
+</html>
